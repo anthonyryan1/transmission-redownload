@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# This script is for use if you have lost torrent data and want to
+# restore it by re-downloading. Useful for example with mergerfs if you
+# have redundant .config/transmission-daemon and non-redundant torrent data
+# The swarm is your backup! :D
+
+TMPDIR=$(dirname $(mktemp -u))
+TRANSMISSION_CONFIG="/storage/.config/transmission-daemon"
+
+
+if [ ! -d "${TRANSMISSION_CONFIG}" ]; then
+    echo "Can't find transmission config, edit the TRANSMISSION_CONFIG variable"
+    exit 1
+fi
+
+if [ ! -d "${TMPDIR}/transmision-redownload" ]; then
+    mkdir "${TMPDIR}/transmision-redownload"
+fi
+
+
+torrent_info () {
+	transmission-remote --torrent $1 --info | sed -n -e "s/^\s*$2: //p"
+}
+
+
+TORRENT_IDS=$(transmission-remote --list | grep '\*' | awk '{ print $1 }' | sed 's/\*$//')
+for TORRENT_ID in $TORRENT_IDS; do
+    ERROR=$(torrent_info $TORRENT_ID 'Error')
+    NAME=$(torrent_info $TORRENT_ID 'Name')
+    LOCATION=$(torrent_info $TORRENT_ID 'Location')
+
+    if [[ "${ERROR}" != "No data found! Ensure your drives are connected or use \"Set Location\". To re-download, remove the torrent and re-add it." ]]; then
+        echo "Skipping ${NAME} wrong error: \"${ERROR}\""
+        continue
+    fi
+
+    INFOHASH=$(torrent_info $TORRENT_ID 'Hash')
+
+    echo "Re-dewnloading ${NAME} into ${LOCATION}"
+    cp "${TRANSMISSION_CONFIG}/torrents/${INFOHASH}.torrent" "${TMPDIR}/transmision-redownload/${INFOHASH}.torrent"
+    transmission-remote --torrent $TORRENT_ID --remove
+    transmission-remote --add "${TMPDIR}/transmision-redownload/${INFOHASH}.torrent" --download-dir "${LOCATION}"
+done
